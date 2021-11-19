@@ -1,7 +1,8 @@
-FROM python:3.7-slim as base
+FROM python:3.8-slim as base
 
-RUN apt-get update -qq \
- && apt-get install -y --no-install-recommends \
+RUN apt-get clean && \
+    apt-get update -qq && \
+  apt-get install -y --no-install-recommends --allow-unauthenticated \
     # required by psycopg2 at build and runtime
     libpq-dev \
      # required for health check
@@ -11,7 +12,7 @@ RUN apt-get update -qq \
 FROM base as builder
 
 RUN apt-get update -qq && \
-  apt-get install -y --no-install-recommends \
+  apt-get install -y --no-install-recommends --allow-unauthenticated \
   build-essential \
   wget \
   openssh-client \
@@ -20,7 +21,7 @@ RUN apt-get update -qq && \
   git-core \
   openssl \
   libssl-dev \
-  libffi6 \
+  libffi7 \
   libffi-dev \
   libpng-dev
 
@@ -36,22 +37,39 @@ COPY . /build/
 # change working directory
 WORKDIR /build
 
+# make sure we use the virtualenv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# # install dependencies
+# RUN python -m venv /opt/venv && \
+#   . /opt/venv/bin/activate && \
+#   pip install --no-cache-dir -U 'pip<20' && \
+#   poetry install --extras full --no-dev --no-root --no-interaction
+
 # install dependencies
 RUN python -m venv /opt/venv && \
-  . /opt/venv/bin/activate && \
-  pip install --no-cache-dir -U 'pip<20' && \
-  poetry install --extras full --no-dev --no-root --no-interaction
+    . /opt/venv/bin/activate && pip install --no-cache-dir -U 'pip<20'
+RUN . /opt/venv/bin/activate && \
+      poetry install --extras spacy --no-dev --no-root --no-interaction 
+      # poetry install --extras full --no-dev --no-root --no-interaction
+RUN . /opt/venv/bin/activate && poetry build -f wheel -n && \
+    pip install --no-deps dist/*.whl && \
+    rm -rf dist *.egg-info
 
 RUN pip install wheel && \
-  cd rasa_addons && \
-  mkdir rasa_addons && \
-  mv `\ls -1 . | grep -v -e setup.py -e rasa_addons` ./rasa_addons/ && \
-  python setup.py install && \
-  cd ..
+    cd rasa_addons && \
+    mkdir rasa_addons && \
+    mv `\ls -1 . | grep -v -e setup.py -e rasa_addons` ./rasa_addons/ && \
+    python setup.py install && \
+    cd ..
 
 RUN poetry build -f wheel -n && \
-  pip install --no-deps dist/*.whl && \
-  rm -rf dist *.egg-info
+    pip install --no-deps dist/*.whl && \
+    rm -rf dist *.egg-info
+
+# spacy link
+RUN python -m spacy download pt_core_news_sm && \
+  python -m spacy link pt_core_news_sm pt
 
 # start a new build stage
 FROM base as runner
